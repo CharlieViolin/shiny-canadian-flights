@@ -1,0 +1,145 @@
+---
+title: |
+  | Annual air passenger traffic at Canadian airports
+  | STATS 780
+author: "Charlie Vioin | 400147837"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  pdf_document:
+    includes:
+      in_header: header.tex
+    toc: yes
+  html_document:
+    toc: yes
+    df_print: paged
+bibliography: HW1.bib
+fontsize: 11pt
+geometry: margin = 1in
+linestretch: 1.5
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+```
+
+\newpage
+
+```{r packages, message=FALSE}
+library(tidyverse, magrittr)
+pacman::p_load(xray, scales)
+```
+
+```{r dataload, message=FALSE}
+data <- read_csv("23100253.csv", show_col_types = FALSE)
+```
+
+## Introduction
+
+### (i) Data Description
+
+|       The following data, 'Air passenger traffic at Canadian airports, annual', [@government_of_canada_air_2022] summarizes Canadian annual air passenger traffic by province and territory, capturing data from all major Canadian airports. Quarterly and monthly data from sub-surveys are collected and amalgamated in [\color{blue}Airport Activity Survey \color{black}](https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=2310025301)as part of larger efforts of measurements in Canada. The captured data is published on the [\color{blue}Statistics Canada \color{black}](https://www.statcan.gc.ca/en/start)website and is used for measuring major airport activity, capacity levels and creating strategies for Canada's airports [@government_of_canada_airport_2022].
+
+|       The variables of the data set include; `REF_DATE` (year), `GEO` (geography), `Air passenger traffic` - as units of passengers (or number of flights depending flight type) represented as `VALUE`. Other census metadata identifiers such as `DGUID`, `UOM`, `UOM_ID`, `SCALAR_FACTOR`, `SCALAR_ID`, `VECTOR`, `COORDINATE`, `SYMBOL`, `TERMINATED`, and `DECIMALS` are also in the downloaded data.
+
+## Methods
+
+### (ii) Data Transformation & Pre-processing
+
+|       The data set includes columns that do not contain useful information for this report. Unit of measurement (`UOM`, `UOM_ID`), scalars `(SCALAR_FACTOR`, `SCALAR_ID`), and other columns containing metadata noted above are dropped. Specifically, columns retained for inclusion are; `REF_DATE`, `GEO`, `Air passenger traffic` type, and `VALUE` - these contain categorical and quantitative data. Steps for data transformation and pre-processing:
+
+1.  Explore the data using `str()` and printing the data object after reading in the csv as a tibble - to ID the column types and names.
+2.  Pipe the data; selecting columns of interest and renaming with clear and consistent names.
+3.  Create factors for all columns except `count` which remains an integer, and filter `geography` to the country, provincial, and territorial totals.
+4.  'total, passenger sector' is dropped from the categorical variables due it representing duplicate information from the 'total, passengers enplaned and deplaned' factor, which is more clear and is exactly the same data. (See reference material for proofs)
+5.  Missing values were searched for with `xray::anomalies()`, on the cleaned data.
+    -   metadata was referenced and the `STATUS` variable notes the specific exclusion of some data due to no count being applicable, not available for a specific period of time, or suppressed for confidentiality requirements of the [\color{blue}Statistics Act\color{black}](https://laws-lois.justice.gc.ca/eng/acts/s-19/fulltext.html) @government_of_canada_statistics_2017.
+    -   **rows with `NA` values were kept** because if rows with `NA` were excluded it would remove 48.98% of rows. A row containing one missing value would discard other meaningful data.
+6.  Outlier values were sought using `anomalies()`, which identified 17 zero values. After viewing the `cleaned_data` all zero values were **noticed manually** to be constrained to the most remote and lowly populated regions of the country; Prince Edward Island, Nunavut, Yukon, and the Northwest Territories, which may not have an audience to attract international flights. Additionally, some regions saw none of their airports accepting international flights at points during the COVID-19 pandemic (@chivukula_covid-19_2020).
+    - statistical patterns of missing values were not explored.
+
+```{r results=FALSE}
+str(data, give.attr = FALSE)
+```
+
+```{r include=FALSE}
+# colnames to ID names for selected columns
+cleaned_data <- data %>% 
+    select(REF_DATE, GEO, "Air passenger traffic", VALUE) %>% 
+    rename(year = REF_DATE, geo = GEO,
+           pass_traffic_type = "Air passenger traffic",
+           count = VALUE) %>% 
+    mutate(year = as.numeric(as.character(year))) %>% 
+    mutate(geo = as.factor(geo)) %>% 
+    mutate(pass_traffic_type = as.factor(pass_traffic_type)) %>% 
+    filter(geo == "Canada" | geo == "Alberta" | geo == "British Columbia" |
+               geo == "Manitoba" | geo == "New Brunswick" |
+               geo == "Newfoundland and Labrador" |
+               geo == "Northwest Territories" | geo == "Nova Scotia" |
+               geo == "Nunavut" | geo == "Ontario" |
+               geo == "Prince Edward Island" | geo == "Quebec" |
+               geo == "Saskatchewan" | geo == "Yukon") %>% 
+    filter(pass_traffic_type != "Total, passenger sector") %>% 
+        # dropped b/c equal to 'Total, enplaned and deplaned'
+    spread(pass_traffic_type, count) %>% 
+        # make into tidy data, pass passenger air traffic type as an observation
+    rename(domestic = "Domestic sector",
+           intl_other = "Other International sector",
+           pass_flights = "Passenger flights",
+           pass_deplaned = "Passengers deplaned",
+           pass_enplaned = "Passengers enplaned",
+           total_pass = "Total, passengers enplaned and deplaned",
+           transborder = "Transborder sector")
+
+anomalies(cleaned_data)
+```
+
+## Results
+
+### (iii) Plot by Province/Territory
+
+```{r prov_graph, warning=FALSE, fig.cap="Total number of air passengers in Canada by Province/Territory from 2008-2021.", fig.align = 'center', out.width="70%"}
+provinces_only <- filter(cleaned_data, geo != "Canada") 
+
+ggplot(provinces_only, aes(year, total_pass, group = geo)) + 
+    geom_line(aes(color = geo)) +
+    geom_point(aes(color = geo)) + 
+    ylab("Number of passengers (in millions)") + 
+    xlab("Year") + 
+    scale_y_continuous(labels = unit_format(unit = "M", scale = 1e-6))
+```
+
+|      Figure 1, total air travel passengers (enplaned and deplaned) across provinces in Canada increased for Ontario, BC, Alberta, and Quebec from 2008 to 2019 while the remaining provinces saw relatively static travel. A notable change for many provinces is the years of 2020 and 21 where a large drop in air passengers numbers occurred; Ontario dropped from >60 M air travelers in 2019 to <20 M in 2020. This trend was similar for BC, Alberta, Quebec, and many of the remaining provinces and territories. Overall, air passenger numbers across provinces were on an upward trend from 2008-2019 while 2020/21 saw large decreases and minimal passenger numbers.
+
+### (iv) Aggregate Plot
+
+```{r can_graph, fig.cap="Total number of air passengers in Canada from 2008-2021.", fig.align = 'center', out.width="55%"}
+canada_only <- filter(cleaned_data, geo == "Canada") 
+
+ggplot(canada_only, aes(year, total_pass, group = geo)) + 
+    geom_line() +
+    geom_point() + 
+    ylab("Number of passengers (in millions)") + 
+    xlab("Year") +
+    scale_y_continuous(labels = unit_format(unit = "M", scale = 1e-6))
+```
+
+|       The plot of total air travel passengers aggregated for Canada increased from 2008 to 2019 - ~110 M to >160 M. One large change is in the years of 2020/21 where a large drop in numbers occurred. Overall, air passenger numbers in Canada were trending upward from 2008-2019, but dropped significantly in 2020 and 2021.
+
+## (v) Shiny
+
+A link to the [\color{blue}Passenger Count by Year, Geography, and Flight Type \color{black}](https://charlieviolin.shinyapps.io/HW1_VIOLINC-app/?_ga=2.33669410.2089822775.1675315620-511854008.1673393480)app is included.
+
+```{r}
+# transform type of flight to categorical
+flight_category <- provinces_only %>% 
+    select(c("year", "geo", "domestic", "intl_other", "transborder")) %>% 
+    gather("flight_type", "passengers", 3:5) %>% 
+    mutate(flight_type = as.factor(flight_type)) 
+
+saveRDS(flight_category , file = "~/Library/CloudStorage/OneDrive-McMasterUniversity/Winter 2023/CSE-STATS 780/Assignments/HW/01_HW/HW1_VIOLINC-app/data/flight_category.rds")
+```
+
+\newpage
+
+## References
+

@@ -1,0 +1,211 @@
+---
+title: |
+  | STATS 780
+  | Assignment 1 supplementary material
+author: "Charlie Violin"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  pdf_document:
+    includes:
+      in_header: header.tex
+    toc: true
+bibliography: HW1.bib
+fontsize: 11pt
+geometry: margin = 1in
+linestretch: 1.5
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+\newpage
+## (ii) Data Transformation & Pre-processing
+
+|       The data was retrieved from the [\color{blue}Airport Activity Survey \color{black}](https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=2310025301)on the [\color{blue}Statistics Canada \color{black}](https://www.statcan.gc.ca/en/start)website. It contains variables such as geography, year of data, count, and type of flight for a total of 15 variables and 50,751 observations from all commercial, charter, and airports with flights of goods.
+
+Loading required packages.
+```{r packages}
+library(tidyverse, magrittr)
+pacman::p_load(xray, scales)
+```
+
+Reading the data as tibble.
+```{r dataload}
+data <- read_csv("23100253.csv", show_col_types = FALSE)
+```
+
+Explore data structure
+\tiny
+```{r structure}
+str(data, give.attr = FALSE)
+```
+
+\tiny
+```{r dataprint}
+data
+```
+
+\normalsize
+|       Here, the "Total, passenger sector" and "Total, passenger enplaned and deplaned" totals are verified to be equal and in order to appropriately dismiss one of them and consolidate the data. An example on the Canada totals is below; filtering for the totals and verifying equality with the sum of the values in the factor `VALUE` column of .
+```{r total_passcheck}
+data_check <- data %>% 
+    select(c(GEO, REF_DATE, `Air passenger traffic`, VALUE)) %>% 
+    filter(GEO == "Ontario" &
+               (`Air passenger traffic` == "Total, passenger sector" |
+                `Air passenger traffic` ==
+                   "Total, passengers enplaned and deplaned"))
+
+data_check1 <- filter(data_check, `Air passenger traffic` ==
+                          "Total, passenger sector")
+data_check2 <- filter(data_check, `Air passenger traffic` ==
+                          "Total, passengers enplaned and deplaned")
+
+sum(data_check1[, 4]) == sum(data_check2[, 4])
+```
+
+\normalsize
+|       Clean data by using pipe operator from `magrittr` package to collect columns of interest; renaming, converting to factors for flight type and geography, while year is converted to a numeric entry.  
+|       Filter for provinces, territories, and Canada only as to omit subtotals from their subsidiary airports, as well as filtering flight types that are not 'total, passenger sector' as the number of passenger sector passengers is equal to 'total, passengers enplaned and deplaned' - reducing duplicate data.  
+|       Spread data into wide format for easier viewing and simplify flight type factor names.
+```{r clean}
+cleaned_data <- data %>% 
+    select(REF_DATE, GEO, "Air passenger traffic", VALUE) %>% 
+    rename(year = REF_DATE, geo = GEO,
+           pass_traffic_type = "Air passenger traffic",
+           count = VALUE) %>% 
+    mutate(year = as.numeric(as.character(year))) %>% 
+    mutate(geo = as.factor(geo)) %>% 
+    mutate(pass_traffic_type = as.factor(pass_traffic_type)) %>% 
+    filter(geo == "Canada" | geo == "Alberta" | geo == "British Columbia" |
+               geo == "Manitoba" | geo == "New Brunswick" |
+               geo == "Newfoundland and Labrador" |
+               geo == "Northwest Territories" | geo == "Nova Scotia" |
+               geo == "Nunavut" | geo == "Ontario" |
+               geo == "Prince Edward Island" | geo == "Quebec" |
+               geo == "Saskatchewan" | geo == "Yukon") %>% 
+    filter(pass_traffic_type != "Total, passenger sector") %>% 
+        # dropped b/c equal to 'Total, enplaned and deplaned'
+    spread(pass_traffic_type, count) %>% 
+        # make into tidy data
+        # pass passenger air traffic type as an observation
+    rename(domestic = "Domestic sector",
+           intl_other = "Other International sector",
+           pass_flights = "Passenger flights",
+           pass_deplaned = "Passengers deplaned",
+           pass_enplaned = "Passengers enplaned",
+           total_pass = "Total, passengers enplaned and deplaned",
+           transborder = "Transborder sector")
+```
+
+Inspect for Na's
+\tiny
+```{r anom}
+anomalies(cleaned_data)
+```
+
+\normalsize
+## (iii) Plot by Province/Territory
+
+|       Filter out data for the country (Canada) and create a line plot for entire year range of the data, 2008-2021, group by and colour each region by the same colour. 
+Convert y-axis scale to millions to create more appealing scale labels.
+```{r prov_only}
+provinces_only <- filter(cleaned_data, geo != "Canada") 
+```
+
+```{r prov_graph, eval=FALSE}
+ggplot(provinces_only, aes(year, total_pass, group = geo)) + 
+    geom_line(aes(color = geo)) + geom_point(aes(color = geo)) + 
+    ylab("Number of passengers (in millions)") + xlab("Year") + 
+    scale_y_continuous(labels = unit_format(unit = "M", scale = 1e-6))
+```
+
+## (iv) Aggregate Plot
+
+|       Filter cleaned data to Canada (country as a whole) only, and apply all previous plot conditions here with the exception of not grouping due to only one region.
+```{r can_only}
+canada_only <- filter(cleaned_data, geo == "Canada") 
+```
+
+```{r can_graph, eval=FALSE}
+ggplot(canada_only, aes(year, total_pass)) +  geom_line() + geom_point() + 
+    ylab("Number of passengers (in millions)") + xlab("Year") +
+    scale_y_continuous(labels = unit_format(unit = "M", scale = 1e-6))
+```
+
+## (v) Shiny App
+
+|       In order to create a shiny app for the flight category within the provinces/territories only, I selected the domestic, transborder, and other international passengers counts as different flight types. These flight categories summed to the total passengers.
+
+|       Although the sum of NA's in each flight category is different due to different exclusion reasons already mentioned, the sum of passengers from the three flights categories is equal because they can be derived from one another
+
+```{r}
+print(c(sum(is.na(provinces_only$domestic)),
+        sum(is.na(provinces_only$transborder)),
+        sum(is.na(provinces_only$intl_other)),
+        sum(is.na(provinces_only$total_pass))))
+```
+
+Sums of passengers from domestic, intl other, and trans border sum *and* equal total passengers.
+```{r}
+sum(provinces_only[1, c("domestic", "intl_other", "transborder")]) ==
+    sum(provinces_only[1, "total_pass"])
+```
+Transform type of flight to categorical.
+```{r shinyprep2, eval=FALSE}
+flight_category <- provinces_only %>% 
+    select(c("year", "geo", "domestic", "intl_other", "transborder")) %>% 
+    gather("flight_type", "passengers", 3:5) %>% 
+    mutate(flight_type = as.factor(flight_type)) 
+
+saveRDS(flight_category , file = "HW1_VIOLINC-app/data/flight_category.rds")
+```
+
+### Shiny App UI & Server
+```{r shinyapp, eval=FALSE}
+library(shiny)
+library(ggplot2)
+library(scales)
+
+df <- readRDS("data/flight_category.rds")
+
+ui <- fluidPage(
+    titlePanel("Passenger Count by Year, Geography, and Flight Type"),
+
+    sidebarLayout(
+        sidebarPanel(
+            selectInput("flight_type", "Flight Type", unique(df$flight_type)),
+            sliderInput("year", label = "Years", value = c(2008, 2021),
+                        min = 2008, max = 2021, sep = ""),
+            checkboxGroupInput("geo", "Geography:",
+                               unique(df$geo), selected = unique(df$geo))
+        ),
+        mainPanel(
+            plotOutput("plot")
+        )
+    )
+)
+
+server <- function(input, output) {
+    output$plot <- renderPlot({
+        # Filter data based on user input
+        df_subset <- df[df$geo %in% input$geo &
+                            df$flight_type == input$flight_type, ]
+
+        ggplot(df_subset, aes(year, passengers, color = geo)) +
+            geom_line() + geom_point() +
+            ggtitle(paste0("Passenger Count for ", input$flight_type,
+                           " flights in Canada")) +
+            xlab("Year") + ylab("Passenger Count") +
+            scale_y_continuous(labels = unit_format(unit = "M", scale = 1e-6)) +
+            scale_x_continuous(limits = c(input$year)) +
+            theme(plot.title = element_text(size = 16, face = "bold"),
+                  axis.title.y = element_text(size = 14, face = "bold"),
+                  axis.title.x = element_text(size = 14, face = "bold"),
+                  axis.text.y = element_text(size = 12),
+                  axis.text.x = element_text(size = 12))
+    })
+}
+
+shinyApp(ui = ui, server = server)
+```
